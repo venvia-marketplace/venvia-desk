@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{net::{TcpListener, SocketAddr}, path::Path};
 use sysinfo::{Disks, System};
 
@@ -16,6 +16,31 @@ pub struct Check {
 }
 fn check(name: &str, state: &str, detail: impl Into<String>) -> Check {
     Check { name: name.into(), state: state.into(), detail: detail.into() }
+}
+#[derive(Deserialize)]
+struct RuntimeManifest {
+    approved: bool,
+    packages: Vec<RuntimePackage>,
+}
+#[derive(Deserialize)]
+struct RuntimePackage {
+    id: String,
+    version: String,
+    sha256: Option<String>,
+    status: String,
+}
+fn runtime_checks() -> Vec<Check> {
+    let raw = include_str!("../../../runtime/windows-x64.candidates.json");
+    let Ok(manifest) = serde_json::from_str::<RuntimeManifest>(raw) else {
+        return vec![check("Runtime", "blocked", "Manifest non valido")];
+    };
+    let mut out = Vec::new();
+    for pkg in manifest.packages {
+        let hash = pkg.sha256.as_deref().is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()));
+        out.push(check(&format!("Pacchetto {}", pkg.id), "blocked", format!("Versione candidata {}; {}; checksum registrato: {}. Archivio locale e firma non verificati.",pkg.version,pkg.status,hash)));
+    }
+    out.push(check("Autorizzazione runtime","blocked",if manifest.approved { "Flag presente ma firma e catena di fiducia non implementate" } else { "Manifest candidato non approvato" }));
+    out
 }
 pub fn plan(root: &Path, mode: &str) -> ServerPlan {
     let mut checks = vec![
@@ -36,8 +61,8 @@ pub fn plan(root: &Path, mode: &str) -> ServerPlan {
         let available = TcpListener::bind(SocketAddr::from(([127,0,0,1], port))).is_ok();
         checks.push(check(&format!("TCP {port}"), if available { "ok" } else { "review" }, "Sonda temporanea loopback; non garantisce disponibilità futura"));
     }
-    checks.push(check("Runtime PHP / MariaDB / Nginx", "blocked", "Pacchetti ufficiali versionati e verificati non ancora approvati"));
-    checks.push(check("VenVia Core PHP", "blocked", "Archivio sorgente completo e contratto di installazione non ancora disponibili"));
+    checks.extend(runtime_checks());
+    checks.push(check("VenVia Core PHP", "blocked", "Contratto preliminare disponibile; archivio Core completo non ancora verificato"));
     checks.push(check("DNS e HTTPS", "blocked", "Configurazione dominio e certificati da implementare"));
     checks.push(check("Servizi Windows e ripristino", "blocked", "Provisioning privilegiato non ancora implementato"));
     ServerPlan { ready: checks.iter().all(|c| c.state == "ok"), checks, installation_enabled: false }
@@ -45,6 +70,12 @@ pub fn plan(root: &Path, mode: &str) -> ServerPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn runtime_candidates_never_authorize_installation() {
+        let checks = runtime_checks();
+        assert_eq!(checks.len(), 4);
+        assert!(checks.iter().all(|c| c.state == "blocked"));
+    }
     #[test]
     fn plan_cannot_authorize_installation() {
         let p = plan(std::env::temp_dir().as_path(), "client");
