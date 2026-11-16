@@ -1,0 +1,9 @@
+# VenVia Server Setup — Windows x64 LAB
+
+Independent test installer; not the production Desk Alpha 5 or Core 0.3. Caddy replaces Nginx for the new local runtime. The existing Desk diagnostic still lists legacy Nginx until integration.
+
+Extract the entire CI artifact to a new folder; keep packages next to the executable. Launch VenVia-Server-Setup.exe as a normal user and click Installa e avvia laboratorio. The setup validates embedded SHA-256 values, extracts runtime archives into a new per-user LocalAppData VenVia Lab directory, initializes a disposable MariaDB instance and tests Caddy -> PHP FastCGI -> MariaDB SELECT 1. A compatible Visual C++ x64 runtime must already be present. No PowerShell is exposed to the operator.
+
+Loopback only: HTTP 18080, PHP 19000, MariaDB 13306. No certificates, LAN access, firewall changes, Windows services, production data or Core installation yet. HTTP is strictly for this isolated non-authenticated test; no credentials are sent over HTTP. Stop/close terminates owned processes (currently forced shutdown, not suitable for real data); abrupt termination can leave processes running. No automatic deletion of data. Temporary root and probe passwords are random and separate; initialization/SQL tools use local process arguments, which are not appropriate for production credentials. Never use real business data. The packaged installer is unsigned and should not be distributed as an approved release. Do not bypass antivirus warnings.
+
+The separate workflow verifies PHP/Caddy archive hashes and MariaDB publisher signature, builds the self-contained GUI, runs a real integration smoke test, then scans the output with Defender before publishing an artifact. This runtime lab may be integrated into the Rust Desk later; C# is a temporary GUI harness only.
