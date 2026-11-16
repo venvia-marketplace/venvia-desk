@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "platform": "windows-x64",
+  "approved": false,
+  "packages": [
+    {
+      "id": "php",
+      "version": "8.5.12-1",
+      "variant": "VS17 x64 NTS",
+      "source": "https://www.php.net/downloads.php?os=windows",
+      "sha256": "2a36a2edcb7a5b9252f638fd5e4cf84d7f6e066092654220dc0b63e5cf4e9723",
+      "status": "publisher-hash-recorded",
+      "required": [
+        "php-cgi.exe",
+        "php.exe"
+      ],
+      "prerequisite": "Microsoft Visual C++ 2015-2022 Redistributable x64"
+    },
+    {
+      "id": "mariadb",
+      "version": "11.4.13",
+      "variant": "winx64",
+      "source": "https://mariadb.org/download/",
+      "sha256": null,
+      "status": "signature-and-hash-pending"
+    },
+    {
+      "id": "nginx",
+      "version": "1.30.6",
+      "variant": "windows",
+      "source": "https://nginx.org/en/download.html",
+      "sha256": null,
+      "status": "signature-and-hash-pending"
+    }
+  ],
+  "requirements": [
+    "Verify exact upstream archive, signature where available, hash and license",
+    "Validate VC runtime",
+    "Isolate privileged provisioning",
+    "Never overwrite existing data",
+    "Test FastCGI, authenticated SQL, HTTPS and reboot",
+    "Require approved signed manifest before installing"
+  ]
+}
