@@ -1,0 +1,90 @@
+name: VenVia Server Setup | Windows x64 LAB
+run-name: "Server Setup - ${{ github.event.head_commit.message || github.ref_name }}"
+on:
+  push:
+    branches: ['desk/0.4']
+    paths:
+      - 'server-setup/**'
+      - '.github/workflows/server-setup-windows.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  setup:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download pinned PHP, MariaDB and Caddy packages
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path upstream | Out-Null
+          $base = 'https://archive.mariadb.org/mariadb-11.4.13/winx64-packages'
+          curl.exe --fail --location --proto '=https' --retry 2 'https://www.php.net/~windows/releases/php-8.5.12-1-nts-Win32-vs17-x64.zip' -o upstream/php.zip
+          if ($LASTEXITCODE) { throw 'PHP download failed' }
+          curl.exe --fail --location --proto '=https' --retry 2 'https://github.com/caddyserver/caddy/releases/download/v2.11.9/caddy_2.11.9_windows_amd64.zip' -o upstream/caddy.zip
+          if ($LASTEXITCODE) { throw 'Caddy download failed' }
+          curl.exe --fail --location --proto '=https' --retry 2 "$base/mariadb-11.4.13-winx64.zip" -o upstream/mariadb.zip
+          if ($LASTEXITCODE) { throw 'MariaDB download failed' }
+          curl.exe --fail --location --proto '=https' --retry 2 "$base/mariadb-11.4.13-winx64.zip.asc" -o upstream/mariadb.zip.asc
+          if ($LASTEXITCODE) { throw 'MariaDB signature download failed' }
+          curl.exe --fail --location --proto '=https' 'https://supplychain.mariadb.com/MariaDB-Server-GPG-KEY' -o upstream/mariadb-key.asc
+          if ($LASTEXITCODE) { throw 'MariaDB key download failed' }
+      - name: Verify pinned hashes and MariaDB publisher signature
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $php = (Get-FileHash upstream/php.zip -Algorithm SHA256).Hash
+          $caddy = (Get-FileHash upstream/caddy.zip -Algorithm SHA256).Hash
+          if ($php -ine '2a36a2edcb7a5b9252f638fd5e4cf84d7f6e066092654220dc0b63e5cf4e9723') { throw 'PHP checksum mismatch' }
+          if ($caddy -ine 'ad93112d335ee687100c4c9f11bced16ca590377976b7fe7883882b9e797e472') { throw 'Caddy checksum mismatch' }
+          $gpg = (Get-Command gpg.exe -ErrorAction Stop).Source
+          $homeDir = Join-Path $env:RUNNER_TEMP 'venvia-gpg'
+          New-Item -ItemType Directory -Path $homeDir | Out-Null
+          & $gpg --homedir $homeDir --batch --import upstream/mariadb-key.asc
+          if ($LASTEXITCODE) { throw 'Key import failed' }
+          $sig = & $gpg --homedir $homeDir --batch --status-fd 1 --verify upstream/mariadb.zip.asc upstream/mariadb.zip
+          if ($LASTEXITCODE) { throw 'MariaDB signature invalid' }
+          $valid = @($sig | Where-Object { $_ -match '^\[GNUPG:\] VALIDSIG ' })
+          if ($valid.Count -ne 1 -or ($valid[0] -split ' ')[-1] -ne '177F4010FE56CA3336300305F1656F24C74CD1D8') { throw 'Unexpected MariaDB signing key' }
+          $maria = (Get-FileHash upstream/mariadb.zip -Algorithm SHA256).Hash
+          @{php=$php;caddy=$caddy;mariadb=$maria} | ConvertTo-Json -Compress | Set-Content server-setup/runtime.json -Encoding utf8NoBOM
+      - name: Build self-contained Windows Setup GUI
+        run: |
+          dotnet publish server-setup/VenVia.ServerSetup.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist
+          if ($LASTEXITCODE) { throw 'Build failed' }
+          New-Item -ItemType Directory dist/packages | Out-Null
+          Copy-Item upstream/*.zip dist/packages/
+          Copy-Item server-setup/README.md dist/README.md
+      - name: Real Caddy PHP FastCGI MariaDB smoke test
+        run: |
+          $proc = Start-Process -FilePath (Resolve-Path dist/VenVia-Server-Setup.exe) -ArgumentList '--smoke' -PassThru
+          if (!$proc.WaitForExit(600000)) { Stop-Process -Id $proc.Id -Force; throw 'Smoke test timeout' }
+          if ($proc.ExitCode -ne 0) { throw 'Runtime integration test failed' }
+          'Integrated loopback HTTP / PHP / MariaDB SELECT 1 passed. Not production readiness.' | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Microsoft Defender scan of distribution and extracted test runtime
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $s = Get-MpComputerStatus
+          if (!$s.AMServiceEnabled -or !$s.AntivirusEnabled) { Start-Service WinDefend -ErrorAction Stop }
+          Update-MpSignature
+          $s = Get-MpComputerStatus
+          if (!$s.AMServiceEnabled -or !$s.AntivirusEnabled -or $null -eq $s.AntivirusSignatureAge -or $s.AntivirusSignatureAge -gt 1) { throw 'Defender unavailable' }
+          $scanner = Get-ChildItem "$env:ProgramData/Microsoft/Windows Defender/Platform" -Directory | Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'MpCmdRun.exe' } | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (!$scanner) { throw 'Scanner unavailable' }
+          $start = Get-Date
+          foreach ($target in @((Resolve-Path dist).Path, (Join-Path $env:LOCALAPPDATA 'VenVia'))) {
+            $out = & $scanner -Scan -ScanType 3 -File $target -DisableRemediation 2>&1
+            $rc = $LASTEXITCODE
+            $out | Write-Host
+            if ($rc -ne 0 -or ($out -join "`n") -match '(?im)^\s*(Threat\s+Name|Threat\s+ID|Threat\s+detected)\s*:') { throw 'Defender scan failed' }
+          }
+          if (@(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -ge $start }).Count -gt 0) { throw 'Defender detection' }
+          Get-ChildItem dist -Recurse -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $($_.Path.Substring((Resolve-Path dist).Path.Length+1))" } | Set-Content dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VenVia-Server-Setup-Windows-x64-LAB-UNSIGNED
+          path: dist/
+          if-no-files-found: error
