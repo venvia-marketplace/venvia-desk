@@ -44,13 +44,14 @@ sealed class SetupForm : Form {
         stop.Click+=(_,_)=> {lab?.Dispose();lab=null;Log("Laboratorio arrestato; cartella conservata.");verify.Enabled=stop.Enabled=false;start.Enabled=true;};
         FormClosing+=(_,e)=> {if(busy){e.Cancel=true;return;}lab?.Dispose();};
     }
-    void Log(string s) { if(InvokeRequired){Invoke(()=>Log(s));return;} log.AppendText(s+Environment.NewLine); }
+    void Log(string s) { if(InvokeRequired){Invoke((Action)(()=>Log(s)));return;} log.AppendText(s+Environment.NewLine); }
 }
 sealed class Lab : IDisposable {
     readonly List<Process> children=new();
     readonly string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"VenVia","Lab-"+Guid.NewGuid().ToString("N"));
     readonly string token=Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
     readonly string password=Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+    readonly string rootPassword=Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
     const int Web=18080, Php=19000, Db=13306;
     string PathAt(params string[] parts)=>Path.Combine(new[]{root}.Concat(parts).ToArray());
     static void Free(int port){var l=new TcpListener(IPAddress.Loopback,port);try{l.Start();}finally{l.Stop();}}
@@ -103,11 +104,11 @@ sealed class Lab : IDisposable {
         File.WriteAllText(PathAt("php","php.ini"),"extension_dir=\""+Slash(PathAt("php","ext"))+"\"\nextension=pdo_mysql\nextension=mbstring\nextension=openssl\nextension=curl\nextension=zip\nextension=fileinfo\ndisplay_errors=Off\nlog_errors=On\ncgi.fix_pathinfo=0\n");
         await RunAsync(PathAt("php","php.exe"),new[]{"-c",PathAt("php","php.ini"),"-r","exit(extension_loaded('pdo_mysql') ? 0 : 1);"},php);
         log("PHP CLI verificato.");
-        await RunAsync(Path.Combine(bin,"mariadb-install-db.exe"),new[]{"--datadir="+data,"--password="+password,"--port="+Db},maria);
+        await RunAsync(Path.Combine(bin,"mariadb-install-db.exe"),new[]{"--datadir="+data,"--password="+rootPassword,"--port="+Db},maria);
         Start(Path.Combine(bin,"mariadbd.exe"),new[]{"--no-defaults","--basedir="+maria,"--datadir="+data,"--bind-address=127.0.0.1","--port="+Db,"--skip-name-resolve","--console"},maria);
         File.WriteAllText(PathAt("public","index.php"),"<?php header('Content-Type: application/json'); try { $p=new PDO('mysql:host=127.0.0.1;port=13306;dbname=venvia_lab','venvia_probe',getenv('VV_LAB_PASSWORD'),[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]); echo json_encode(['ok'=>(string)$p->query('SELECT 1')->fetchColumn()==='1','token'=>getenv('VV_LAB_TOKEN')]); } catch(Throwable $e){http_response_code(503);echo '{\"ok\":false}';}");
         string opt=PathAt("bootstrap.cnf");
-        File.WriteAllText(opt,"[client]\nuser=root\npassword="+password+"\nhost=127.0.0.1\nport="+Db+"\nprotocol=tcp\n");
+        File.WriteAllText(opt,"[client]\nuser=root\npassword="+rootPassword+"\nhost=127.0.0.1\nport="+Db+"\nprotocol=tcp\n");
         try{
             bool ready=false;
             for(int i=0;i<30;i++){
