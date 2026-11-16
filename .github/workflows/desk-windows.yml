@@ -1,10 +1,10 @@
 name: VenVia Desk | Windows x64 | Build e validazione sicurezza
-run-name: "Desk Windows — ${{ github.event.head_commit.message || github.ref_name }}"
+run-name: "Desk Windows - ${{ github.event.head_commit.message || github.ref_name }}"
 on:
   push:
     branches: ['desk/0.4']
     paths:
-      - 'desk/native/**'
+      - 'native/**'
       - '.github/workflows/desk-windows.yml'
   workflow_dispatch:
 permissions:
@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 90
     defaults:
       run:
-        working-directory: desk/native/src-tauri
+        working-directory: native/src-tauri
     steps:
       - uses: actions/checkout@v4
       - name: Prepare Rust
@@ -116,5 +116,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: VenVia-Desk-security-validation-UNSIGNED
-          path: desk/native/src-tauri/dist/
+          path: native/src-tauri/dist/
           if-no-files-found: error
