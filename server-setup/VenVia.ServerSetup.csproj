@@ -7,4 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>VenVia-Server-Setup</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="runtime.json" LogicalName="VenVia.runtime.json" />
+  </ItemGroup>
 </Project>
