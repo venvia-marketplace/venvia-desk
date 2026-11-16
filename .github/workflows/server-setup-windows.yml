@@ -41,7 +41,9 @@ jobs:
           if ($php -ine '2a36a2edcb7a5b9252f638fd5e4cf84d7f6e066092654220dc0b63e5cf4e9723') { throw 'PHP checksum mismatch' }
           if ($caddy -ine 'ad93112d335ee687100c4c9f11bced16ca590377976b7fe7883882b9e797e472') { throw 'Caddy checksum mismatch' }
           $gpg = (Get-Command gpg.exe -ErrorAction Stop).Source
-          $homeDir = Join-Path $env:RUNNER_TEMP 'venvia-gpg'
+          # Git for Windows GPG uses MSYS paths. A relative directory works
+          # with both native Windows and MSYS builds, without drive translation.
+          $homeDir = 'upstream/gpg-home'
           New-Item -ItemType Directory -Path $homeDir | Out-Null
           & $gpg --homedir $homeDir --batch --import upstream/mariadb-key.asc
           if ($LASTEXITCODE) { throw 'Key import failed' }
@@ -49,6 +51,7 @@ jobs:
           if ($LASTEXITCODE) { throw 'MariaDB signature invalid' }
           $valid = @($sig | Where-Object { $_ -match '^\[GNUPG:\] VALIDSIG ' })
           if ($valid.Count -ne 1 -or ($valid[0] -split ' ')[-1] -ne '177F4010FE56CA3336300305F1656F24C74CD1D8') { throw 'Unexpected MariaDB signing key' }
+          Write-Host 'MariaDB publisher signature and pinned primary fingerprint verified.'
           $maria = (Get-FileHash upstream/mariadb.zip -Algorithm SHA256).Hash
           @{php=$php;caddy=$caddy;mariadb=$maria} | ConvertTo-Json -Compress | Set-Content server-setup/runtime.json -Encoding utf8NoBOM
       - name: Build self-contained Windows Setup GUI
